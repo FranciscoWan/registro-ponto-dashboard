@@ -79,26 +79,20 @@ class PontoAPI:
                 total_dia += (fim - inicio)
 
             for api_day in range(start_day, end_day + 1):
-                python_day = api_day - 1  # Python: 0=segunda
+                python_day = api_day - 2 
                 carga_por_dia[python_day] = total_dia
 
         return carga_por_dia
 
 class HorasTrabalhadas:
-    carga_por_dia = {
-        0: timedelta(hours=9),
-        1: timedelta(hours=9),
-        2: timedelta(hours=9),
-        3: timedelta(hours=9),
-        4: timedelta(hours=8),
-    }
-
-    carga_semanal = sum(carga_por_dia.values(), timedelta())
-    carga_mensal = carga_semanal * 4
-
-    def __init__(self, dados):
+    def __init__(self, dados, carga_por_dia):
         self.dados = dados
+        self.carga_por_dia = carga_por_dia
         self.horas_por_semana = defaultdict(timedelta)
+
+        self.carga_semanal = sum(self.carga_por_dia.values(), timedelta())
+        self.carga_mensal = self.carga_semanal * 4
+
         self.calcular()
 
     @staticmethod
@@ -268,3 +262,5 @@ class HorasTrabalhadas:
             }
 
         return None
+    
+

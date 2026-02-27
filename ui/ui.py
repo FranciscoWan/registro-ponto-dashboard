@@ -143,8 +143,9 @@ class AppUI:
             api.login()
 
             dados = api.buscar_marcas(ano, mes)
+            carga_por_dia = api.buscar_carga_horaria()
 
-            horas = HorasTrabalhadas(dados)
+            horas = HorasTrabalhadas(dados, carga_por_dia)
 
             self.render_resumo_diario(horas)
             self.render_metricas(horas)
