@@ -59,6 +59,27 @@ class AppUI:
             padding-top: 1rem;
             padding-bottom: 1rem;
         }
+        
+        h1 {
+            font-size: 30px !important;
+            text-align: center;
+        }
+
+        h2 {
+            font-size: 24px !important;
+        }
+
+        h3 {
+            font-size: 22px !important;
+        }
+
+        div[data-testid="stMetricValue"] {
+            font-size: 32px !important;
+        }
+
+        div[data-testid="stMetricLabel"] {
+            font-size: 18px !important;
+        }
 
         @media (max-width: 768px) {
 
@@ -87,7 +108,6 @@ class AppUI:
 
             div[data-testid="stMetricLabel"] {
                 font-size: 13px !important;
-
             }
 
             .block-container {
@@ -145,7 +165,8 @@ class AppUI:
             dados = api.buscar_marcas(ano, mes)
             carga_por_dia = api.buscar_carga_horaria()
 
-            horas = HorasTrabalhadas(dados, carga_por_dia)
+            
+            horas = HorasTrabalhadas(dados, carga_por_dia, ano, mes)
 
             self.render_resumo_diario(horas)
             self.render_metricas(horas)
@@ -166,7 +187,7 @@ class AppUI:
 
         for i, (semana, info) in enumerate(resumo.items()):
             cols[i].metric(
-                label=f"Semana {semana}",
+                label=f"Semana {semana-1}",
                 value=HorasTrabalhadas.formatar_timedelta(info["total"]),
                 delta=HorasTrabalhadas.formatar_timedelta(info["saldo"])
             )

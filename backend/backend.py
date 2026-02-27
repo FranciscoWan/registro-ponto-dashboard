@@ -3,6 +3,8 @@ import requests
 from datetime import datetime, timedelta
 from collections import defaultdict
 
+from .calendar_function import info_mes
+
 
 class PontoAPI:
     def __init__(self, login, password):
@@ -17,6 +19,7 @@ class PontoAPI:
             "login": self.login_user,
             "password": self.password_user
         }
+
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json"
@@ -37,16 +40,30 @@ class PontoAPI:
     def buscar_marcas(self, ano: int, mes: int):
         if not self.token:
             raise Exception("Token inválido, faça login primeiro.")
+
         inicio = datetime(ano, mes, 1).strftime("%Y-%m-%d")
-        fim = datetime(ano, mes + 1, 1) - timedelta(days=1) if mes < 12 else datetime(ano+1, 1, 1) - timedelta(days=1)
+
+        if mes < 12:
+            fim = datetime(ano, mes + 1, 1) - timedelta(days=1)
+        else:
+            fim = datetime(ano + 1, 1, 1) - timedelta(days=1)
+
         fim = fim.strftime("%Y-%m-%d")
+
         url = f"https://apiweb.registroponto.com.br/api/v1/employee-day-events?DateGte={inicio}&DateLte={fim}"
-        headers = {"Authorization": f"Bearer {self.token}", "Accept": "application/json"}
+
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Accept": "application/json"
+        }
+
         resp = requests.get(url, headers=headers)
+
         if resp.status_code != 200:
             raise Exception(f"Erro ao buscar dados: {resp.text}")
+
         return resp.json()
-    
+
     def buscar_carga_horaria(self):
         if not self.token:
             raise Exception("Token inválido, faça login primeiro.")
@@ -64,7 +81,6 @@ class PontoAPI:
             raise Exception("Erro ao buscar carga horária")
 
         dados = resp.json()
-
         carga_por_dia = {}
 
         for periodo in dados.get("workedPeriods", []):
@@ -79,153 +95,147 @@ class PontoAPI:
                 total_dia += (fim - inicio)
 
             for api_day in range(start_day, end_day + 1):
-                python_day = api_day - 2 
-                carga_por_dia[python_day] = total_dia
+                python_day = api_day - 2  # ajuste API → Python (0=segunda)
+                if 0 <= python_day <= 6:
+                    carga_por_dia[python_day] = total_dia
 
         return carga_por_dia
 
+
 class HorasTrabalhadas:
-    def __init__(self, dados, carga_por_dia):
+    def __init__(self, dados, carga_por_dia, ano, mes):
         self.dados = dados
         self.carga_por_dia = carga_por_dia
+        self.ano = ano
+        self.mes = mes
+
         self.horas_por_semana = defaultdict(timedelta)
 
-        self.carga_semanal = sum(self.carga_por_dia.values(), timedelta())
-        self.carga_mensal = self.carga_semanal * 4
+        self.calendario_mes = info_mes(ano, mes)
+        self.mapa_dia_semana = self._mapear_dias_para_semana()
+        self.carga_semanal_real = self._calcular_carga_semanal_real()
+        self.carga_mensal_real = sum(self.carga_semanal_real.values(), timedelta())
 
         self.calcular()
 
-    @staticmethod
-    def formatar_timedelta(td: timedelta):
-        total_segundos = int(td.total_seconds())
-        sinal = "-" if total_segundos < 0 else ""
-        total_segundos = abs(total_segundos)
-        horas = total_segundos // 3600
-        minutos = (total_segundos % 3600) // 60
-        segundos = total_segundos % 60
-        return f"{sinal}{horas:02d}:{minutos:02d}:{segundos:02d}"
+    # =============================
+    # MAPEAMENTO DE DIAS
+    # =============================
+    def _mapear_dias_para_semana(self):
+        mapa = {}
 
+        for indice_semana, semana in enumerate(self.calendario_mes, start=1):
+            for posicao_dia, dia in enumerate(semana):
+                if dia == 0:
+                    continue
+
+                if posicao_dia in (5, 6):  # ignora sábado/domingo
+                    continue
+
+                mapa[dia] = indice_semana
+
+        return mapa
+
+    # =============================
+    # CARGA ESPERADA REAL
+    # =============================
+    def _calcular_carga_semanal_real(self):
+        carga_semanal = defaultdict(timedelta)
+
+        for indice_semana, semana in enumerate(self.calendario_mes, start=1):
+            for posicao_dia, dia in enumerate(semana):
+                if dia == 0:
+                    continue
+
+                if posicao_dia in (5, 6):
+                    continue
+
+                if posicao_dia in self.carga_por_dia:
+                    carga_semanal[indice_semana] += self.carga_por_dia[posicao_dia]
+
+        return carga_semanal
+
+    # =============================
+    # CÁLCULO DAS HORAS
+    # =============================
     def calcular(self):
         for dia in self.dados:
             clockings = dia.get("clockings", [])
             requests_dia = dia.get("requests", [])
+
             data_obj = datetime.strptime(dia["date"], "%d/%m/%Y")
             dia_do_mes = data_obj.day
-            semana = min(((dia_do_mes - 1) // 7) + 1, 4)
-            total_dia = timedelta()
             weekday = data_obj.weekday()
+
+            # só considera dias úteis do mês
+            if dia_do_mes not in self.mapa_dia_semana:
+                continue
+
             if weekday not in self.carga_por_dia:
                 continue
+
+            semana = self.mapa_dia_semana[dia_do_mes]
+            total_dia = timedelta()
+
+            # ✔ CASO 1 — TEM MARCAÇÃO
             if clockings:
                 horarios = [datetime.fromisoformat(c["date"]) for c in clockings]
                 horarios.sort()
-                for i in range(0, len(horarios), 2):
-                    if i+1 < len(horarios):
-                        total_dia += horarios[i+1] - horarios[i]
+
+                for i in range(0, len(horarios) - 1, 2):
+                    total_dia += horarios[i + 1] - horarios[i]
+
+                # ponto aberto
+                if len(horarios) % 2 != 0:
+                    total_dia += datetime.now() - horarios[-1]
+
                 self.horas_por_semana[semana] += total_dia
+
+            # ✔ CASO 2 — TEM REQUEST (atestado, abono etc.)
             elif requests_dia:
                 self.horas_por_semana[semana] += self.carga_por_dia[weekday]
 
+            # ✔ CASO 3 — DIA ÚTIL SEM CLOCKING E SEM REQUEST
+            # NÃO SOMA NADA
+            # (dispensa não deve gerar débito automático)
+
+    # =============================
+    # RESUMO SEMANAL
+    # =============================
     def resumo_semanal(self):
         resumo = {}
 
-        horas_semana_atual = self.horas_por_semana.copy()
-        resumo_dia = self.resumo_diario()
-
-        if resumo_dia:
-            hoje = datetime.now().date()
-
-            for dia in self.dados:
-                data_obj = datetime.strptime(dia["date"], "%d/%m/%Y").date()
-
-                if data_obj == hoje:
-                    dia_do_mes = data_obj.day
-                    semana_atual = min(((dia_do_mes - 1) // 7) + 1, 4)
-
-                    weekday = data_obj.weekday()
-
-                    if weekday in self.carga_por_dia:
-                        clockings = dia.get("clockings", [])
-                        horarios = [datetime.fromisoformat(c["date"]) for c in clockings]
-                        horarios.sort()
-
-                        total_dia_fechado = timedelta()
-
-                        for i in range(0, len(horarios) - 1, 2):
-                            total_dia_fechado += horarios[i + 1] - horarios[i]
-
-                        horas_semana_atual[semana_atual] -= total_dia_fechado
-                        horas_semana_atual[semana_atual] += resumo_dia["trabalhado"]
-        for semana in range(1, 5):
-            total = horas_semana_atual.get(semana, timedelta())
-            saldo = total - self.carga_semanal
-
-            status = (
-                "🟢 Extra"
-                if saldo > timedelta()
-                else "🔴 Déficit"
-                if saldo < timedelta()
-                else "⚪ Exato"
-            )
+        for semana in self.carga_semanal_real:
+            total = self.horas_por_semana.get(semana, timedelta())
+            esperado = self.carga_semanal_real[semana]
+            saldo = total - esperado
 
             resumo[semana] = {
                 "total": total,
-                "saldo": saldo,
-                "status": status
+                "esperado": esperado,
+                "saldo": saldo
             }
 
         return resumo
 
+    # =============================
+    # RESUMO MENSAL
+    # =============================
     def resumo_mensal(self):
         total_mensal = sum(self.horas_por_semana.values(), timedelta())
-
-        resumo_dia = self.resumo_diario()
-
-        if resumo_dia:
-            hoje = datetime.now().date()
-
-            for dia in self.dados:
-                data_obj = datetime.strptime(dia["date"], "%d/%m/%Y").date()
-
-                if data_obj == hoje:
-                    weekday = data_obj.weekday()
-
-                    if weekday in self.carga_por_dia:
-                        carga_dia = self.carga_por_dia[weekday]
-
-                        clockings = dia.get("clockings", [])
-                        horarios = [datetime.fromisoformat(c["date"]) for c in clockings]
-                        horarios.sort()
-
-                        total_dia_fechado = timedelta()
-
-                        for i in range(0, len(horarios) - 1, 2):
-                            total_dia_fechado += horarios[i + 1] - horarios[i]
-
-                        total_mensal -= total_dia_fechado
-                        total_mensal += resumo_dia["trabalhado"]
-
-        saldo_mensal = total_mensal - self.carga_mensal
-
-        status_mensal = (
-            "🟢 Horas extras no mês"
-            if saldo_mensal > timedelta()
-            else "🔴 Horas faltantes"
-            if saldo_mensal < timedelta()
-            else "⚪ Mês fechado exato"
-        )
+        saldo_mensal = total_mensal - self.carga_mensal_real
 
         return {
             "total": total_mensal,
-            "esperado": self.carga_mensal,
-            "saldo": saldo_mensal,
-            "status": status_mensal
+            "esperado": self.carga_mensal_real,
+            "saldo": saldo_mensal
         }
-    
+
+    # =============================
+    # RESUMO DIÁRIO (CORRIGIDO)
+    # =============================
     def resumo_diario(self):
         hoje = datetime.now().date()
-        total_dia = timedelta()
-        carga_dia = timedelta()
 
         for dia in self.dados:
             data_obj = datetime.strptime(dia["date"], "%d/%m/%Y").date()
@@ -238,29 +248,41 @@ class HorasTrabalhadas:
             if weekday not in self.carga_por_dia:
                 return None
 
-            carga_dia = self.carga_por_dia[weekday]
-
             clockings = dia.get("clockings", [])
-            horarios = [datetime.fromisoformat(c["date"]) for c in clockings]
-            horarios.sort()
+            total_dia = timedelta()
 
-            # pares fechados
-            for i in range(0, len(horarios) - 1, 2):
-                total_dia += horarios[i + 1] - horarios[i]
+            if clockings:
+                horarios = [datetime.fromisoformat(c["date"]) for c in clockings]
+                horarios.sort()
 
-            # ponto aberto (ímpar)
-            if len(horarios) % 2 != 0:
-                ultima_entrada = horarios[-1]
-                total_dia += datetime.now() - ultima_entrada
+                for i in range(0, len(horarios) - 1, 2):
+                    total_dia += horarios[i + 1] - horarios[i]
 
-            tempo_restante = carga_dia - total_dia
+                # ponto aberto
+                if len(horarios) % 2 != 0:
+                    total_dia += datetime.now() - horarios[-1]
+
+            esperado = self.carga_por_dia[weekday]
+            restante = esperado - total_dia
 
             return {
                 "trabalhado": total_dia,
-                "esperado": carga_dia,
-                "restante": tempo_restante
+                "esperado": esperado,
+                "restante": restante
             }
 
         return None
-    
 
+    # =============================
+    # FORMATADOR
+    # =============================
+    @staticmethod
+    def formatar_timedelta(td):
+        total_segundos = int(td.total_seconds())
+        sinal = "-" if total_segundos < 0 else ""
+        total_segundos = abs(total_segundos)
+
+        horas = total_segundos // 3600
+        minutos = (total_segundos % 3600) // 60
+
+        return f"{sinal}{horas:02d}:{minutos:02d}"
