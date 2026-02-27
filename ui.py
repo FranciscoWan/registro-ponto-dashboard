@@ -34,6 +34,7 @@ class AppUI:
 
             self.render_metricas(horas)
             self.render_grafico(horas)
+            self.render_resumo_diario(horas)
             self.render_fechamento(horas)
 
         except Exception as e:
@@ -94,3 +95,43 @@ class AppUI:
         st.write(f"**Total Trabalhado:** {HorasTrabalhadas.formatar_timedelta(resumo['total'])}")
         st.write(f"**Total Esperado:** {HorasTrabalhadas.formatar_timedelta(resumo['esperado'])}")
         st.write(f"**Saldo Mensal:** {HorasTrabalhadas.formatar_timedelta(resumo['saldo'])}")
+
+    def render_resumo_diario(self, horas):
+        resumo = horas.resumo_diario()
+
+        if not resumo:
+            return
+
+        st.markdown("## Resumo do Dia")
+
+        trabalhado = resumo["trabalhado"]
+        esperado = resumo["esperado"]
+        restante = resumo["restante"]
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric(
+            "Trabalhado Hoje",
+            HorasTrabalhadas.formatar_timedelta(trabalhado)
+        )
+
+        col2.metric(
+            "Carga de Hoje",
+            HorasTrabalhadas.formatar_timedelta(esperado)
+        )
+
+        col3.metric(
+            "Tempo Restante",
+            HorasTrabalhadas.formatar_timedelta(restante)
+        )
+
+        progresso = 0.0
+        if esperado.total_seconds() > 0:
+            progresso = trabalhado.total_seconds() / esperado.total_seconds()
+
+        progresso_visual = min(max(progresso, 0), 1)
+
+        st.markdown("### Progresso Diário")
+        st.progress(progresso_visual)
+
+        st.caption(f"{round(progresso * 100, 1)}% da carga diária cumprida")

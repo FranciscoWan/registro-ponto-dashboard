@@ -104,3 +104,44 @@ class HorasTrabalhadas:
             "saldo": saldo_mensal,
             "status": status_mensal
         }
+    
+    def resumo_diario(self):
+        hoje = datetime.now().date()
+        total_dia = timedelta()
+        carga_dia = timedelta()
+
+        for dia in self.dados:
+            data_obj = datetime.strptime(dia["date"], "%d/%m/%Y").date()
+
+            if data_obj != hoje:
+                continue
+
+            weekday = data_obj.weekday()
+
+            if weekday not in self.carga_por_dia:
+                return None
+
+            carga_dia = self.carga_por_dia[weekday]
+
+            clockings = dia.get("clockings", [])
+            horarios = [datetime.fromisoformat(c["date"]) for c in clockings]
+            horarios.sort()
+
+            # pares fechados
+            for i in range(0, len(horarios) - 1, 2):
+                total_dia += horarios[i + 1] - horarios[i]
+
+            # ponto aberto (ímpar)
+            if len(horarios) % 2 != 0:
+                ultima_entrada = horarios[-1]
+                total_dia += datetime.now() - ultima_entrada
+
+            tempo_restante = carga_dia - total_dia
+
+            return {
+                "trabalhado": total_dia,
+                "esperado": carga_dia,
+                "restante": tempo_restante
+            }
+
+        return None
