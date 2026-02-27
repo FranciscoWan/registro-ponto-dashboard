@@ -2,22 +2,36 @@
 import requests
 from datetime import datetime, timedelta
 from collections import defaultdict
-import config
+
 
 class PontoAPI:
-    def __init__(self):
+    def __init__(self, login, password):
+        self.login_user = login
+        self.password_user = password
         self.token = None
 
     def login(self):
         url = "https://apiweb.registroponto.com.br/api/v1/auth/login"
-        payload = {"login": config.LOGIN, "password": config.PASSWORD}
-        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+
+        payload = {
+            "login": self.login_user,
+            "password": self.password_user
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+
         resp = requests.post(url, json=payload, headers=headers)
+
         if resp.status_code != 200:
-            raise Exception(f"Erro ao logar: {resp.text}")
+            raise Exception("Login inválido")
+
         self.token = resp.json().get("token")
+
         if not self.token:
             raise Exception("Token não encontrado")
+
         return self.token
 
     def buscar_marcas(self, ano: int, mes: int):
@@ -32,6 +46,43 @@ class PontoAPI:
         if resp.status_code != 200:
             raise Exception(f"Erro ao buscar dados: {resp.text}")
         return resp.json()
+    
+    def buscar_carga_horaria(self):
+        if not self.token:
+            raise Exception("Token inválido, faça login primeiro.")
+
+        url = "https://apiweb.registroponto.com.br/api/v1/workday"
+
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Accept": "application/json"
+        }
+
+        resp = requests.get(url, headers=headers)
+
+        if resp.status_code != 200:
+            raise Exception("Erro ao buscar carga horária")
+
+        dados = resp.json()
+
+        carga_por_dia = {}
+
+        for periodo in dados.get("workedPeriods", []):
+            start_day = periodo["startWeekDay"]
+            end_day = periodo["endWeekDay"]
+
+            total_dia = timedelta()
+
+            for turno in periodo.get("times", []):
+                inicio = datetime.strptime(turno["startTime"], "%H:%M:%S")
+                fim = datetime.strptime(turno["endTime"], "%H:%M:%S")
+                total_dia += (fim - inicio)
+
+            for api_day in range(start_day, end_day + 1):
+                python_day = api_day - 1  # Python: 0=segunda
+                carga_por_dia[python_day] = total_dia
+
+        return carga_por_dia
 
 class HorasTrabalhadas:
     carga_por_dia = {
@@ -83,21 +134,93 @@ class HorasTrabalhadas:
 
     def resumo_semanal(self):
         resumo = {}
+
+        horas_semana_atual = self.horas_por_semana.copy()
+        resumo_dia = self.resumo_diario()
+
+        if resumo_dia:
+            hoje = datetime.now().date()
+
+            for dia in self.dados:
+                data_obj = datetime.strptime(dia["date"], "%d/%m/%Y").date()
+
+                if data_obj == hoje:
+                    dia_do_mes = data_obj.day
+                    semana_atual = min(((dia_do_mes - 1) // 7) + 1, 4)
+
+                    weekday = data_obj.weekday()
+
+                    if weekday in self.carga_por_dia:
+                        clockings = dia.get("clockings", [])
+                        horarios = [datetime.fromisoformat(c["date"]) for c in clockings]
+                        horarios.sort()
+
+                        total_dia_fechado = timedelta()
+
+                        for i in range(0, len(horarios) - 1, 2):
+                            total_dia_fechado += horarios[i + 1] - horarios[i]
+
+                        horas_semana_atual[semana_atual] -= total_dia_fechado
+                        horas_semana_atual[semana_atual] += resumo_dia["trabalhado"]
         for semana in range(1, 5):
-            total = self.horas_por_semana.get(semana, timedelta())
+            total = horas_semana_atual.get(semana, timedelta())
             saldo = total - self.carga_semanal
-            status = "🟢 Extra" if saldo > timedelta() else "🔴 Déficit" if saldo < timedelta() else "⚪ Exato"
+
+            status = (
+                "🟢 Extra"
+                if saldo > timedelta()
+                else "🔴 Déficit"
+                if saldo < timedelta()
+                else "⚪ Exato"
+            )
+
             resumo[semana] = {
                 "total": total,
                 "saldo": saldo,
                 "status": status
             }
+
         return resumo
 
     def resumo_mensal(self):
         total_mensal = sum(self.horas_por_semana.values(), timedelta())
+
+        resumo_dia = self.resumo_diario()
+
+        if resumo_dia:
+            hoje = datetime.now().date()
+
+            for dia in self.dados:
+                data_obj = datetime.strptime(dia["date"], "%d/%m/%Y").date()
+
+                if data_obj == hoje:
+                    weekday = data_obj.weekday()
+
+                    if weekday in self.carga_por_dia:
+                        carga_dia = self.carga_por_dia[weekday]
+
+                        clockings = dia.get("clockings", [])
+                        horarios = [datetime.fromisoformat(c["date"]) for c in clockings]
+                        horarios.sort()
+
+                        total_dia_fechado = timedelta()
+
+                        for i in range(0, len(horarios) - 1, 2):
+                            total_dia_fechado += horarios[i + 1] - horarios[i]
+
+                        total_mensal -= total_dia_fechado
+                        total_mensal += resumo_dia["trabalhado"]
+
         saldo_mensal = total_mensal - self.carga_mensal
-        status_mensal = "🟢 Horas extras no mês" if saldo_mensal > timedelta() else "🔴 Horas faltantes" if saldo_mensal < timedelta() else "⚪ Mês fechado exato"
+
+        status_mensal = (
+            "🟢 Horas extras no mês"
+            if saldo_mensal > timedelta()
+            else "🔴 Horas faltantes"
+            if saldo_mensal < timedelta()
+            else "⚪ Mês fechado exato"
+        )
+
         return {
             "total": total_mensal,
             "esperado": self.carga_mensal,

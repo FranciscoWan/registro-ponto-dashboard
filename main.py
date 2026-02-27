@@ -1,5 +1,5 @@
 # main.py
-from ui import AppUI
+from ui.ui import AppUI
 
 def main():
     app = AppUI()
