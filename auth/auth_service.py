@@ -14,8 +14,17 @@ class AuthService:
 
     @classmethod
     def salvar_token(cls, token):
-        cm = cls.init_cookie_manager()
-        cm.set("auth_token", token)
+        from datetime import datetime, timedelta
+
+        cm = cls.get_cookie_manager()
+
+        cm.set(
+            "auth_token",
+            token,
+            expires_at=datetime.now() + timedelta(days=30),
+            secure=True,
+            same_site="Lax"
+        )
 
     @classmethod
     def carregar_token(cls):
