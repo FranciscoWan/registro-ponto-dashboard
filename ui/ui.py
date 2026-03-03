@@ -152,8 +152,9 @@ class AppUI:
 
                         st.rerun()
 
-                    except Exception:
-                        st.error("Login inválido")
+                    except Exception as e:
+                        st.error(f"Erro real: {str(e)}")
+                        raise
 
     # ==============================
     # DASHBOARD

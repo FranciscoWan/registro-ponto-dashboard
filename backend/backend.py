@@ -30,11 +30,15 @@ class PontoAPI:
         if resp.status_code != 200:
             raise Exception(f"Erro API: {resp.status_code} - {resp.text}")
 
-        if not self.token:
-            raise Exception("Token não encontrado")
+        data = resp.json()
 
-        return self.token
+        token = data.get("token")  # <-- pode ser outro nome, confirme
 
+        if not token:
+            raise Exception(f"Token não encontrado na resposta: {data}")
+
+        return token
+    
     def buscar_marcas(self, ano: int, mes: int):
         if not self.token:
             raise Exception("Token inválido, faça login primeiro.")
