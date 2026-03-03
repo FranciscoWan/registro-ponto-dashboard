@@ -28,9 +28,7 @@ class PontoAPI:
         resp = requests.post(url, json=payload, headers=headers)
 
         if resp.status_code != 200:
-            raise Exception("Login inválido")
-
-        self.token = resp.json().get("token")
+            raise Exception(f"Erro API: {resp.status_code} - {resp.text}")
 
         if not self.token:
             raise Exception("Token não encontrado")
