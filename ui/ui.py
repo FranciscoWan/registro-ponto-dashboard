@@ -2,6 +2,7 @@ import streamlit as st
 from backend.backend import PontoAPI, HorasTrabalhadas
 from datetime import datetime
 from auth.auth_service import AuthService
+import time
 
 
 class AppUI:
@@ -10,16 +11,22 @@ class AppUI:
         st.set_page_config(page_title="Controle de Horas", layout="wide")
         self.apply_responsive_styles()
 
-        config = AuthService.carregar_config()
+        cm = AuthService.init_cookie_manager()
 
-        if "auth" not in st.session_state:
-            st.session_state["auth"] = config
+        # Renderiza o componente primeiro
+        _ = cm.get_all()
 
-        if st.session_state["auth"]:
+        token = cm.get("auth_token")
+
+        print("TOKEN:", token)
+
+        if token:
+            st.session_state["auth_token"] = token
             self.render_app()
         else:
             self.render_login()
 
+        
     # ==============================
     # APP PRINCIPAL (após login)
     # ==============================
@@ -42,8 +49,8 @@ class AppUI:
         )
 
         if st.sidebar.button("Sair"):
-            AuthService.limpar_config()
-            st.session_state["auth"] = None
+            AuthService.limpar_token()
+            st.session_state["auth_token"] = None
             st.rerun()
 
         self.render_dashboard(ano, mes)
@@ -138,13 +145,10 @@ class AppUI:
                 if submit:
                     try:
                         api = PontoAPI(login, password)
-                        api.login()
+                        token = api.login()
 
-                        AuthService.salvar_config(login, password)
-                        st.session_state["auth"] = {
-                            "login": login,
-                            "password": password
-                        }
+                        AuthService.salvar_token(token)
+                        st.session_state["auth_token"] = token
 
                         st.rerun()
 
@@ -157,15 +161,14 @@ class AppUI:
     def render_dashboard(self, ano, mes):
 
         try:
-            auth = st.session_state["auth"]
+            token = st.session_state["auth_token"]
 
-            api = PontoAPI(auth["login"], auth["password"])
-            api.login()
+            api = PontoAPI(None, None)
+            api.token = token
 
             dados = api.buscar_marcas(ano, mes)
             carga_por_dia = api.buscar_carga_horaria()
 
-            
             horas = HorasTrabalhadas(dados, carga_por_dia, ano, mes)
 
             self.render_resumo_diario(horas)
@@ -173,7 +176,10 @@ class AppUI:
             self.render_fechamento(horas)
 
         except Exception as e:
-            st.error(str(e))
+            st.error("Sessão expirada. Faça login novamente.")
+            AuthService.limpar_token()
+            st.session_state["auth_token"] = None
+            st.rerun()
 
     # ==============================
     # RESUMO SEMANAL

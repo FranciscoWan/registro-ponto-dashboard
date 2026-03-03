@@ -2,6 +2,8 @@ streamlit==1.32.2
 requests==2.31.0
 plotly==5.19.0
 
+
+
 Comando para criar .venv:
 python -m venv .venv
 
@@ -10,3 +12,5 @@ Ativar .venv:
 
 
 Na pasta do projeto com o .venv ativado, execute "pip install -r requirements.txt"
+
+pip install streamlit-cookies-manager

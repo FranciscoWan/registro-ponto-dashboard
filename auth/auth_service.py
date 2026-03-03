@@ -1,28 +1,28 @@
-import json
-import os
-
-CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".controle_horas", "config.json")
+import streamlit as st
+import extra_streamlit_components as stx
 
 
 class AuthService:
 
     @staticmethod
-    def salvar_config(login, password):
-        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-        with open(CONFIG_PATH, "w") as f:
-            json.dump({
-                "login": login,
-                "password": password
-            }, f)
+    def init_cookie_manager():
+        if "cookie_manager" not in st.session_state:
+            st.session_state["cookie_manager"] = stx.CookieManager(
+                key="global_cookie_manager"
+            )
+        return st.session_state["cookie_manager"]
 
-    @staticmethod
-    def carregar_config():
-        if os.path.exists(CONFIG_PATH):
-            with open(CONFIG_PATH, "r") as f:
-                return json.load(f)
-        return None
+    @classmethod
+    def salvar_token(cls, token):
+        cm = cls.init_cookie_manager()
+        cm.set("auth_token", token)
 
-    @staticmethod
-    def limpar_config():
-        if os.path.exists(CONFIG_PATH):
-            os.remove(CONFIG_PATH)
+    @classmethod
+    def carregar_token(cls):
+        cm = cls.init_cookie_manager()
+        return cm.get("auth_token")
+
+    @classmethod
+    def limpar_token(cls):
+        cm = cls.init_cookie_manager()
+        cm.delete("auth_token")
