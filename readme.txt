@@ -1,7 +1,7 @@
 streamlit==1.32.2
 requests==2.31.0
 plotly==5.19.0
-
+extra-streamlit-components==0.1.60
 
 
 Comando para criar .venv:
